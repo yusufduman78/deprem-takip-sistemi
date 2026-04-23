@@ -5,6 +5,19 @@ Tum yapilandirma degerleri tek bir yerde toplanir.
 Broker degisse, topic eklense sadece bu dosya degisir.
 """
 
+import os
+from dotenv import load_dotenv
+
+# .env dosyasindaki degerleri yukle
+load_dotenv()
+
+# ============================================================
+# FIREBASE AYARLARI
+# ============================================================
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase-credentials.json")
+FIREBASE_DATABASE_URL = os.getenv("FIREBASE_DATABASE_URL", "")
+FIREBASE_DB_NODE = "earthquake_events"  # Verilerin yazilacagi ana dugum
+
 # ============================================================
 # MQTT AYARLARI
 # ============================================================
