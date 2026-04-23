@@ -1,0 +1,207 @@
+IoT Communication
+and Data Bridge Layer
+Hardware & Software Requirements Document
+Earthquake Monitoring and Warning System
+Overview
+The IoT Communication and Data Bridge Layer is responsible for reliable bidirectional MQTT communication between the Sensor Station and the Main Control & Alert Station, while also forwarding critical earthquake data to the Firebase Realtime Database.
+This layer acts as the central data bridge of the entire Earthquake Monitoring and Warning System. It uses two NodeMCU V3 ESP8266 development boards and the MQTT protocol over Wi-Fi to ensure low-latency data transfer. When a seismic event is detected, the earthquake flag and intensity value are transmitted instantly to the Main Station for local alarm activation and to the Firebase Realtime Database for mobile/web notifications and statistical logging.
+Hardware Requirements (HRD)
+The IoT Communication and Data Bridge Layer requires two identical microcontroller platforms to establish Wi-Fi-based communication between the Sensor Station and the Main Control & Alert Station. The components below are utilized specifically for this layer.
+Component
+Description
+Qty
+Purpose
+Microcontroller
+NodeMCU V3 ESP8266 ESP-12E (CH340)
+2
+Sensor Station & Main Station
+Breadboard
+Medium Size Breadboard
+2
+Prototyping & stable connections
+Jumper Cables (M-F)
+40-pin Male-to-Female, 200 mm
+1 set
+GPIO connections & power distribution
+Jumper Cables (M-M)
+40-pin Male-to-Male, 200 mm
+1 set
+Breadboard wiring between components
+Power and Stability Requirements
+Each NodeMCU must be supplied with a stable 5V / 3.3V power source capable of supporting continuous Wi-Fi operation.
+The built-in Wi-Fi antenna on each NodeMCU is sufficient for home or laboratory environments; no external antenna is required.
+All hardware listed above is directly taken from the project component list and is sufficient for implementing the full IoT bridge functionality.
+Software Requirements (SRS)
+1. Functional Requirements
+The IoT Communication and Data Bridge Layer shall provide the following functional capabilities:
+Data Reception from Sensor Station  The layer shall receive seismic data packets sent from the Sensor Station in JSON format via MQTT protocol.
+Real-time Data Forwarding  Upon receiving a data packet, the layer shall instantly forward the same packet to:
+Local alarm: The Main Control & Alert Station for local alarm activation.
+Cloud: The Firebase Cloud platform for mobile/web notifications and statistical logging.
+Earthquake Alarm Prioritization  When the "DEPREM" flag is set in the incoming packet, the layer shall transmit this alarm message with the highest priority to ensure minimum latency for both local buzzer/LED activation and cloud-based push notifications.
+Bidirectional Communication Support  The layer shall support bidirectional messaging, allowing the Main Station to send commands (e.g., "acknowledge", "silence alarm", "request historical data") back to the Sensor Station when necessary.
+Scalability for Multiple Sensors  The communication structure shall be designed to support future expansion, allowing multiple sensor stations to publish data to the same MQTT broker without requiring major code changes.
+Cloud Integration  The layer shall publish earthquake intensity (PGA/Richter value), timestamp, and alarm status to Firebase Realtime Database / Firestore for real-time dashboard visualization and e-mail/SMS notification services.
+2. Non-Functional Requirements
+The following table summarises the non-functional requirements of the IoT Communication and Data Bridge Layer:
+Requirement
+Specification
+Performance & Latency
+Max end-to-end latency ≤ 2 seconds under normal Wi-Fi conditions
+Reliability & Availability
+Auto-reconnect to Wi-Fi within 5 sec; packet loss < 1% under stable network
+Fault Tolerance
+Hardware Watchdog Timer on both NodeMCUs; auto-reset on software lock-up
+Scalability
+MQTT architecture supports up to 5 additional sensor stations without core code changes
+Power Consumption
+Modem-sleep / Light-sleep mode when idle; ≤ 20–80 mA active; no deep-sleep
+Security
+MQTT basic auth (username/password); Firebase API key + database security rules
+Maintainability
+Modular, well-commented code with consistent JSON key naming conventions
+3. Communication Protocols and Data Formats
+Communication Protocol
+MQTT (Message Queuing Telemetry Transport) shall be the primary communication method between Sensor Station and Main Station.
+A public MQTT broker (e.g. HiveMQ broker.hivemq.com) will serve as the central message broker for low-latency data exchange.
+The Main Station NodeMCU will additionally forward critical data to Firebase Realtime Database using the FirebaseClient library (HTTP/WebSocket).
+Data Format
+All messages shall be transmitted in JSON format. JSON provides a lightweight, human-readable, and easily parseable structure suitable for resource-constrained ESP8266 devices.
+MQTT Topic Structure
+The following standardized, hierarchical MQTT topics shall be used:
+MQTT Topic
+Publisher
+Subscriber
+Data / Purpose
+sensors/{device_id}/data
+Sensor Station
+Main Station NodeMCU
+Raw seismic data (PGA, flag, timestamp, accel)
+alerts/main
+Main Station NodeMCU (Bridge)
+Main Control & Alert Station
+Forwarded earthquake packet for local alarm
+cloud/earthquake_events
+Main Station NodeMCU
+Firebase Realtime Database
+Critical data for cloud storage & notifications
+commands/main
+Main Station Logic
+Sensor Station
+Commands: acknowledge, silence_alarm, test
+JSON Payload Example  (Sensor Station → Main Station NodeMCU)
+{
+  "device_id":    "SENSOR_01",
+  "timestamp":   "2026-03-26T15:30:45",
+  "pga":          0.85,
+  "richter":      4.2,
+  "deprem_flag":  true,
+  "accel_x":      0.45,
+  "accel_y":     -0.12,
+  "accel_z":      9.81
+}
+Note: The Bridge forwards the same JSON payload to the Main Station and Firebase without modification, ensuring simplicity and minimum latency.
+4. Error Handling and Recovery Mechanisms
+The IoT Communication and Data Bridge Layer shall include robust error handling and automatic recovery mechanisms to ensure continuous operation:
+Error Condition
+Detection Trigger
+Recovery Action
+Wi-Fi Connection Loss
+Monitor continuously
+Reconnect every 3 sec (max 10 attempts); restart after 30 sec via Watchdog
+Watchdog Timer
+Main loop fed every 4 sec
+Auto-reset board; re-establish MQTT connection on restart
+Packet Timeout
+No data within 10 sec
+Publish sensor_timeout warning to Main Station & cloud; resume on next valid packet
+Invalid JSON
+Malformed / unparsable packet received
+Discard with log entry; continue listening — no crash
+MQTT / Firebase Disconnect
+Broker unreachable
+Queue last 5 messages in RAM; reconnect every 5 sec; publish queued msgs in order
+Recovery Logging
+Any error or recovery event
+Print to Serial monitor; optionally publish to bridge/status MQTT topic
+These mechanisms guarantee that the system remains operational even under unstable network conditions, which is critical for a real-time earthquake warning system.
+5. Interfaces
+The IoT Communication and Data Bridge Layer defines the following interfaces to ensure seamless integration with the other layers and the cloud. All interfaces use the PubSubClient library on ESP8266 and follow a consistent JSON schema to minimize parsing errors between layers.
+Interface
+Protocol
+Direction
+Data
+Sensor Station (Group 1)
+MQTT Pub/Sub
+One-way →
+JSON: PGA, Richter, deprem_flag, accel_x/y/z, timestamp
+Main Control & Alert Station (Group 2)
+MQTT Pub/Sub
+Bidirectional ↔
+Same JSON structure; commands: acknowledge, silence_alarm
+Firebase Cloud
+Firebase SDK (HTTP/WebSocket)
+One-way →
+Earthquake intensity, timestamp, alarm status → /earthquake_events/{id}
+Debug / Monitoring
+Serial (USB)
+Local only
+Real-time debug logs during development and testing
+6. System Flow
+The IoT Communication and Data Bridge Layer follows a simple, event-driven data flow to ensure real-time operation:
+#
+Step
+Actor
+Action / Output
+1
+Data Acquisition
+Sensor Station (Group 1)
+Reads MPU6050 continuously; publishes JSON to sensors/{device_id}/data
+2
+Data Reception
+Main Station NodeMCU (Bridge)
+Subscribes to sensors/{device_id}/data; receives valid JSON packet
+3
+Local Forwarding
+Main Station NodeMCU (Bridge)
+Publishes unchanged packet to alerts/main → triggers local alarm logic
+4
+Cloud Forwarding
+Main Station NodeMCU (Bridge)
+Simultaneously writes same data to Firebase Realtime Database
+5
+Alarm Prioritization
+Bridge / Main Station
+If deprem_flag = true → packet sent with highest priority, zero delay
+6
+Local Alarm Activation
+Main Control & Alert Station (Group 2)
+Activates buzzer, LED, LCD; optionally sends commands to commands/main
+7
+Cloud Processing
+Firebase
+Stores data, updates dashboard, triggers push notifications / e-mail alerts
+7. Assumptions and Constraints
+The following assumptions and constraints apply to the IoT Communication and Data Bridge Layer:
+Type
+Description
+Assumption
+Stable Wi-Fi with internet access is available in the test/deployment environment.
+Assumption
+Firebase project is created and credentials (MQTT username/password & Firebase API key) are available.
+Assumption
+Both NodeMCU boards can connect to the same Wi-Fi network simultaneously without interference.
+Assumption
+Sensor Station & Main Station are within Wi-Fi range of the home router.
+Assumption
+MPU6050 sensor data processing and earthquake flag logic are correctly implemented by Group 1.
+Constraint
+Limited to two NodeMCU V3 ESP8266 boards provided in the component list.
+Constraint
+No external Wi-Fi modules or Ethernet connections available.
+Constraint
+Firebase free-tier quotas (message quota, database size) must be respected during testing.
+Constraint
+Real-time performance depends on Wi-Fi quality; no guarantee during complete internet outages.
+Constraint
+Communication code must run on ESP8266 with ~80 KB RAM; JSON payloads kept small and efficient.
