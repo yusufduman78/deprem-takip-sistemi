@@ -14,12 +14,15 @@ Kullanim:
 import logging
 import json
 import threading
+import time
 
 from config.settings import LOG_LEVEL, LOG_FORMAT, LOG_DATE_FORMAT, LOG_FILE, TOPICS
 from core.mqtt_client import MQTTClient
 from core.message_handler import MessageHandler
 from core.message_queue import MessageQueue
+from core.watchdog import watchdog_loop
 from services.firebase_service import FirebaseService
+
 
 # Kuyruk bosaltma araligi (saniye)
 QUEUE_RETRY_INTERVAL = 10
@@ -121,8 +124,11 @@ def main():
     # 4. MQTT client'i olustur ve mesaj isleyiciyi bagla
     mqtt_client = MQTTClient(on_message_callback=handler.handle_message)
 
-    # 5. Arka planda kuyruk bosaltma dongusunu baslat
+    # 5. Arka plan servislerini (Thread) baslat
     stop_event = threading.Event()
+    start_time = time.time()
+    
+    # 5.a Kuyruk Bosaltici (Retry Mechanism)
     retry_thread = threading.Thread(
         target=start_queue_retry_loop,
         args=(message_queue, firebase, stop_event),
@@ -134,6 +140,15 @@ def main():
         "Kuyruk bosaltma dongusu baslatildi (her %d saniyede kontrol)",
         QUEUE_RETRY_INTERVAL,
     )
+
+    # 5.b Performans Izleyici (Watchdog)
+    watchdog_t = threading.Thread(
+        target=watchdog_loop,
+        args=(stop_event, start_time),
+        daemon=True,
+        name="WatchdogThread",
+    )
+    watchdog_t.start()
 
     # 6. Baglan ve dinlemeye basla
     try:
