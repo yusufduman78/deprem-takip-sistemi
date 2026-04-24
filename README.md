@@ -1,41 +1,91 @@
 # Akıllı Deprem İzleme ve Uyarı Sistemi - IoT Bridge Backend
 
-Bu proje, deprem sensörleri (NodeMCU/C++), ana uyarı istasyonları ve bulut sunucuları (Firebase) arasında **sıfır gecikmeli, hata toleranslı ve hibrit** bir iletişim köprüsü kurmak amacıyla geliştirilmiştir.
+Bu modül, sistemin "Merkezi Sinir Sistemi" görevini görür. Sensörlerden gelen ham verileri işler, hata toleranslı bir şekilde Firebase bulutuna aktarır ve sistem sağlığını izler.
 
-## Mimari Özeti (Clean Architecture)
-Sistem **Hibrit** olarak tasarlanmıştır. Cihazlar (Sensör ve Ana İstasyon) saniyelik tepki vermek için kendi aralarında MQTT üzerinden doğrudan konuşurlar (Sunucudan bağımsızdırlar). 
-Python tabanlı "Bridge Backend" ise bu konuşmaları görünmez bir şekilde dinleyip, istatistikleri ve deprem verilerini Firebase Realtime Database'e kaydeder. İnternet kesilse bile veriler kaybolmaz, RAM'de kuyruklanıp internet gelince buluta iletilir.
+---
 
-## Kurulum ve Çalıştırma
+## 🏗️ Katmanlı Mimari (Layered Architecture)
 
-1. **Gereksinimler:**
-   - Python 3.11+
-   - `conda activate depremenv` ortamının aktif olması.
-   - Proje dizininde `firebase-credentials.json` kimlik dosyasının bulunması.
-   - Proje dizininde ayarların tutulduğu `.env` dosyasının oluşturulması (Örnek `FIREBASE_DATABASE_URL=...`).
+Proje, temiz kod prensiplerine uygun olarak şu katmanlara ayrılmıştır:
 
-2. **Bağımlılıkların Yüklenmesi:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+- **`core/`**: MQTT iletişimi, mesaj işleme, RAM kuyruğu ve Watchdog (Sistem sağlığı).
+- **`services/`**: Firebase Admin SDK entegrasyonu.
+- **`config/`**: Merkezi ayarlar ve MQTT topic yönetimi.
+- **`docs/`**: Analiz raporları ve sistem dökümantasyonu.
+- **`mock/`**: Test simülatörleri.
 
-3. **Ana Sunucunun Başlatılması:**
+---
+
+## 🔌 Donanım Entegrasyon Rehberi
+
+Donanım modüllerinin sisteme bağlanması için aşağıdaki MQTT standartlarını takip etmesi gerekir:
+
+### 📡 Bağlantı Ayarları
+
+- **Broker:** `broker.hivemq.com`
+- **Port:** `1883`
+- **Format:** JSON
+
+### 📤 Veri Gönderimi (Sensör -> Bridge)
+
+Sensörler verilerini şu kanala (topic) push etmelidir:
+
+- **Topic:** `sensors/SENSOR_ID/data` (Örn: `sensors/SENSOR_01/data`)
+- **JSON Şeması:**
+
+```json
+{
+  "device_id": "SENSOR_01",
+  "timestamp": "2026-03-26T15:30:45",
+  "richter": 4.2,
+  "pga": 0.85,
+  "deprem_flag": true,
+  "accel_x": 0.45,
+  "accel_y": -0.12,
+  "accel_z": 9.81
+}
+```
+
+### 🪦 Durum Takibi (LWT - Opsiyonel)
+
+Sensörün koptuğunu anlamamız için bağlantı sırasında şu "Vasiyet" (Will) ayarlanabilir:
+
+- **LWT Topic:** `sensors/SENSOR_ID/status`
+- **LWT Mesajı:** `OFFLINE`
+
+---
+
+## 🖥️ Arayüz Entegrasyon Rehberi
+
+Dashboard'un yüksek performanslı çalışması için **Hibrit Model** tasarlanmıştır:
+
+### 1. Canlı Grafik Verisi (Anlık Sarsıntı Akışı)
+
+Dashboard, veriyi Firebase yerine doğrudan MQTT üzerinden almalıdır. Bu, gecikmeyi (latency) minimize eder ve Firebase kotasını korur.
+
+- **MQTT Topic:** `cloud/earthquake_events`
+- **Kullanım:** Dashboard bu kanalı dinleyerek gelen her veriyi anlık grafiğe döker.
+
+### 2. Geçmiş Kayıtlar ve İstatistikler
+
+Kalıcı veriler ve geçmiş deprem listesi Firebase üzerinden okunmalıdır.
+
+- **Firebase Node:** `/earthquake_events`
+- **Kullanım:** Bridge, sadece `deprem_flag: true` olan kritik verileri buraya kalıcı olarak yazar.
+
+---
+
+## 🛠️ Kurulum ve Çalıştırma
+
+1. **Bağımlılıklar:** `pip install -r requirements.txt`
+2. **Yapılandırma:** `.env` dosyasını oluşturun ve `FIREBASE_DATABASE_URL` değerini girin.
+3. **Başlatma:**
    ```bash
    python bridge_backend.py
    ```
 
-## Test Etme (Donanım Olmadan)
-Fiziksel sensörleriniz yoksa, sistemi test etmek için 3 terminal açın ve şu komutları sırayla çalıştırın:
-1. `python bridge_backend.py` (Görünmez Yönetici / Sunucu)
-2. `python -m mock.ana_istasyon_taklit` (Alarm Ünitesi Simülatörü)
-3. `python -m mock.sensor_taklit` (Deprem Tetikleyici - *Enter tuşuna basarak deprem yollayabilirsiniz*)
+## 🛡️ Gelişmiş Özellikler
 
-## Modüller
-- `core/mqtt_client.py`: Ağ iletişimini yönetir.
-- `core/message_handler.py`: Gelen verileri işler, doğrulamasını (timestamp, richter vs.) yapar.
-- `core/message_queue.py`: İnternet kesintilerinde veri kaybını önler (50 mesajlık RAM tamponu).
-- `core/watchdog.py`: Uygulamanın aylarca açık kalabilmesi için RAM/CPU sağlığını izler.
-- `services/firebase_service.py`: Google Firebase bağlantısını kurar.
-
-## Hata Toleransı (Fail-Safe)
-Sistem `QueueRetryThread` sayesinde her 10 saniyede bir bağlantıyı denetler. Eğer sunucuda internet kesilirse, gelen veriler atılmaz. Bağlantı tekrar kurulduğu an veriler geriye dönük olarak Firebase'e kaydedilir.
+- **Fail-Safe Queue:** İnternet koptuğunda veriler RAM'de saklanır, bağlantı gelince Firebase'e otomatik basılır.
+- **System Watchdog:** RAM ve CPU kullanımını izler, sistem kilitlenmelerini önceden raporlar.
+- **LWT Monitoring:** Cihazların çevrimdışı kalma durumlarını anlık olarak loglar.

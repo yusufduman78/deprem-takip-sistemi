@@ -35,6 +35,7 @@ MQTT_RECONNECT_MAX_DELAY = 30  # saniye
 # ============================================================
 TOPICS = {
     "sensor_data": "sensors/+/data",           # Tum sensorlerden gelen veri
+    "sensor_status": "sensors/+/status",       # (Opsiyonel) Sensor arıza/lwt takibi
     "commands": "commands/main",                # Ana Istasyondan gelen komutlar
     "cloud_events": "cloud/earthquake_events",  # Bulut kanalina yonlendirme
 }

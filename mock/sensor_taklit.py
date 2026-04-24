@@ -101,7 +101,15 @@ def main():
         client_id="mock-sensor-01",
         protocol=mqtt.MQTTv311,
     )
+
+    # LWT (Son Vasiyet) Ayari: Eger sensor aniden koparsa Broker bu mesaji otomatik yollar
+    client.will_set(f"sensors/{DEVICE_ID}/status", payload="OFFLINE", qos=1, retain=True)
+
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    
+    # Baglaninca durumumuzu ONLINE yapalim
+    client.publish(f"sensors/{DEVICE_ID}/status", payload="ONLINE", qos=1, retain=True)
+    
     client.loop_start()
 
     # Arka planda normal veri gonderimini baslat

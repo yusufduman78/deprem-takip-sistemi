@@ -71,14 +71,8 @@ class FirebaseService:
             return False
 
         try:
-            # Veriye sunucu tarafinda zaman damgasi ekle
-            enriched = {
-                **data,
-                "server_timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-
             # push() her kayda benzersiz bir ID atar (ornek: -NxYz123...)
-            new_ref = self._ref.push(enriched)
+            new_ref = self._ref.push(data)
             logger.info(
                 "Firebase'e yazildi | ID: %s | Cihaz: %s | Richter: %s",
                 new_ref.key,

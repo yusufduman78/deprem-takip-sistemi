@@ -8,6 +8,7 @@ MQTT veya Firebase'den habersizdir; sadece veriyi isler.
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from config.settings import REQUIRED_SENSOR_FIELDS
 
@@ -29,6 +30,8 @@ class MessageHandler:
         self._on_earthquake_callbacks = []
         # Komut geldiginde cagrilacak callback listesi
         self._on_command_callbacks = []
+        # Sensor durum degisimi (LWT) geldiginde cagrilacak callback listesi
+        self._on_sensor_status_callbacks = []
 
     # ----------------------------------------------------------
     # CALLBACK KAYIT METODLARI
@@ -49,6 +52,11 @@ class MessageHandler:
         Imza: callback(data: dict)"""
         self._on_command_callbacks.append(callback)
 
+    def register_sensor_status_handler(self, callback):
+        """Sensor koptugunda veya baglandiginda (LWT) cagrilacak fonksiyon.
+        Imza: callback(device_id: str, status: str)"""
+        self._on_sensor_status_callbacks.append(callback)
+
     # ----------------------------------------------------------
     # ANA YONLENDIRME (ROUTER)
     # ----------------------------------------------------------
@@ -60,6 +68,8 @@ class MessageHandler:
         """
         if topic.startswith("sensors/") and topic.endswith("/data"):
             self._process_sensor_data(topic, raw_payload)
+        elif topic.startswith("sensors/") and topic.endswith("/status"):
+            self._process_sensor_status(topic, raw_payload)
         elif topic == "commands/main":
             self._process_command(raw_payload)
         else:
@@ -76,6 +86,9 @@ class MessageHandler:
         data = self._safe_parse_json(raw_payload)
         if data is None:
             return
+
+        # 1.a Zaman Damgası Ekle (Merkezi olarak burada ekliyoruz)
+        data["server_timestamp"] = datetime.now(timezone.utc).isoformat()
 
         # 2. Alan dogrulama (validation)
         if not self._validate_fields(data, REQUIRED_SENSOR_FIELDS):
@@ -105,12 +118,32 @@ class MessageHandler:
                 device_id, richter, pga, timestamp,
             )
 
-        # 4. Genel sensor verisi callback'lerini tetikle (her durumda)
         for cb in self._on_sensor_data_callbacks:
             try:
                 cb(data)
             except Exception as e:
                 logger.error("Sensor data callback hatasi: %s", e)
+
+    # ----------------------------------------------------------
+    # SENSOR DURUM (LWT) ISLEME
+    # ----------------------------------------------------------
+
+    def _process_sensor_status(self, topic: str, raw_payload: str):
+        """Sensor koptugunda (OFFLINE) veya baglandiginda gelen formati isler."""
+        # Topic formatı: sensors/SENSOR_01/status
+        try:
+            device_id = topic.split("/")[1]
+            status = raw_payload.strip().upper()
+            
+            if status == "OFFLINE":
+                logger.critical("!!! ALARM !!! SENSOR KOPTU: %s", device_id)
+            else:
+                logger.info("Sensor durumu guncellendi: %s -> %s", device_id, status)
+                
+            for cb in self._on_sensor_status_callbacks:
+                cb(device_id, status)
+        except Exception as e:
+            logger.error("Sensor status islenirken hata: %s", e)
 
     # ----------------------------------------------------------
     # KOMUT ISLEME

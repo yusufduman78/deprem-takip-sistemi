@@ -107,9 +107,10 @@ def main():
 
     # Deprem alarmi geldiginde -> Firebase'e yaz
     def on_earthquake(data: dict):
+        # server_timestamp zaten MessageHandler icinde eklendi
         success = firebase.write_event(data)
         if not success:
-            # Firebase'e yazilamazsa kuyrukla
+            # Firebase'e yazilamazsa kuyrukla (zaman damgasi paketin icinde sakli)
             message_queue.enqueue(TOPICS["cloud_events"], data)
             logger.warning("Firebase'e yazilamadi, kuyruga eklendi.")
 
@@ -117,9 +118,17 @@ def main():
     def on_command(data: dict):
         logger.info("Komut islendi: %s", data.get("command", "bilinmiyor"))
 
+    # Sensor baglantisi koptugunda -> logla ve (opsiyonel) Firebase'e yaz
+    def on_sensor_status(device_id: str, status: str):
+        if status == "OFFLINE":
+            logger.critical("MQTT'den LWT mesaji alindi. %s cihazinin elektrigi veya interneti kesilmis olabilir!", device_id)
+            # Istersen ileride bunu Firebase'e yazabilirsin
+            # firebase.write_event({"device_id": device_id, "deprem_flag": False, "error": "OFFLINE"})
+
     handler.register_sensor_data_handler(on_sensor_data)
     handler.register_earthquake_handler(on_earthquake)
     handler.register_command_handler(on_command)
+    handler.register_sensor_status_handler(on_sensor_status)
 
     # 4. MQTT client'i olustur ve mesaj isleyiciyi bagla
     mqtt_client = MQTTClient(on_message_callback=handler.handle_message)
