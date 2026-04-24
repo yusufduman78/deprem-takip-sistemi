@@ -15,6 +15,7 @@ import logging
 import json
 import threading
 import time
+from datetime import datetime, timezone
 
 from config.settings import LOG_LEVEL, LOG_FORMAT, LOG_DATE_FORMAT, LOG_FILE, TOPICS
 from core.mqtt_client import MQTTClient
@@ -81,6 +82,40 @@ def start_queue_retry_loop(message_queue, firebase, stop_event):
             logger.info("Kuyruk basariyla bosaltildi: %d mesaj gonderildi.", sent)
 
 
+def start_sensor_timeout_loop(last_seen_times, mqtt_client, stop_event):
+    """
+    Arka planda calisarak 10 saniyeden uzun suredir 
+    veri gondermeyen sensorleri tespit eder ve alarm uretir.
+    """
+    logger = logging.getLogger("TimeoutMonitor")
+    alerted_sensors = set()
+    
+    while not stop_event.is_set():
+        stop_event.wait(2.0)  # Her 2 saniyede bir kontrol et
+        if stop_event.is_set():
+            break
+            
+        now = time.time()
+        for device_id, last_seen in list(last_seen_times.items()):
+            if now - last_seen > 10.0:
+                if device_id not in alerted_sensors:
+                    logger.warning("!!! SENSOR TIMEOUT !!! %s cihazindan 10 saniyedir veri alinamiyor!", device_id)
+                    
+                    # Frontend'in gorebilmesi icin bulut kanalina uyari bas
+                    payload = json.dumps({
+                        "device_id": device_id, 
+                        "status": "TIMEOUT", 
+                        "error": "Veri akisi kesildi",
+                        "server_timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    mqtt_client.publish(TOPICS["cloud_events"], payload)
+                    alerted_sensors.add(device_id)
+            else:
+                if device_id in alerted_sensors:
+                    logger.info("Sensor baglantisi geri geldi: %s", device_id)
+                    alerted_sensors.remove(device_id)
+
+
 def main():
     # 1. Loglama sistemini kur
     setup_logging()
@@ -96,23 +131,47 @@ def main():
 
     message_queue = MessageQueue()
 
+    # State Tracking (Durum Takipleri)
+    last_publish_times = {}  # Throttling icin
+    last_seen_times = {}     # Timeout takibi icin
+    
+    PUBLISH_INTERVAL = 0.2   # Saniyede 5 paket (1 / 5 = 0.2)
+
     # 3. Mesaj isleyiciyi olustur ve callback'leri kaydet
     handler = MessageHandler()
 
-    # Her sensor verisi geldiginde -> cloud topic'ine yonlendir
+    # Her sensor verisi geldiginde -> Throttling uygula -> cloud topic'ine yonlendir
     def on_sensor_data(data: dict):
-        payload = json.dumps(data)
-        mqtt_client.publish(TOPICS["cloud_events"], payload)
-        logger.info("Bulut kanalina yonlendirildi: %s", TOPICS["cloud_events"])
+        device_id = data.get("device_id", "UNKNOWN")
+        now = time.time()
+        
+        # Son gorulme zamanini guncelle (Timeout sistemi icin)
+        last_seen_times[device_id] = now
+        
+        # Saniyede 5 paket sinirlamasi (Throttling)
+        last_pub = last_publish_times.get(device_id, 0)
+        if now - last_pub >= PUBLISH_INTERVAL:
+            payload = json.dumps(data)
+            mqtt_client.publish(TOPICS["cloud_events"], payload)
+            last_publish_times[device_id] = now
+            # Yogun akista log ekranini kirletmemek icin INFO logunu kapattik/kisitik
+            # Sadece DEBUG olarak kalabilir veya sessizce gonderilebilir.
 
     # Deprem alarmi geldiginde -> Firebase'e yaz
     def on_earthquake(data: dict):
+        device_id = data.get("device_id", "UNKNOWN")
+        last_seen_times[device_id] = time.time()  # Depremde de aktifligini korur
+        
         # server_timestamp zaten MessageHandler icinde eklendi
         success = firebase.write_event(data)
         if not success:
             # Firebase'e yazilamazsa kuyrukla (zaman damgasi paketin icinde sakli)
             message_queue.enqueue(TOPICS["cloud_events"], data)
             logger.warning("Firebase'e yazilamadi, kuyruga eklendi.")
+            
+        # Deprem alarmi Throttling (Seyreltme) KURALLARINI DELER! Aninda MQTT'ye de basilmali.
+        payload = json.dumps(data)
+        mqtt_client.publish(TOPICS["cloud_events"], payload)
 
     # Komut geldiginde -> logla (ileride sensor'e iletilecek)
     def on_command(data: dict):
@@ -150,14 +209,23 @@ def main():
         QUEUE_RETRY_INTERVAL,
     )
 
-    # 5.b Performans Izleyici (Watchdog)
+    # 5.b Performans Izleyici (Watchdog) - Artik MQTT Client, Queue ve Last Seen yolluyoruz
     watchdog_t = threading.Thread(
         target=watchdog_loop,
-        args=(stop_event, start_time),
+        args=(stop_event, start_time, mqtt_client, TOPICS.get("system_health"), message_queue, last_seen_times),
         daemon=True,
         name="WatchdogThread",
     )
     watchdog_t.start()
+    
+    # 5.c Sensor Timeout (Kopma) Takipcisi
+    timeout_t = threading.Thread(
+        target=start_sensor_timeout_loop,
+        args=(last_seen_times, mqtt_client, stop_event),
+        daemon=True,
+        name="TimeoutThread",
+    )
+    timeout_t.start()
 
     # 6. Baglan ve dinlemeye basla
     try:

@@ -38,6 +38,7 @@ TOPICS = {
     "sensor_status": "sensors/+/status",       # (Opsiyonel) Sensor arıza/lwt takibi
     "commands": "commands/main",                # Ana Istasyondan gelen komutlar
     "cloud_events": "cloud/earthquake_events",  # Bulut kanalina yonlendirme
+    "system_health": "system/health",           # Watchdog ve sunucu saglik verileri
 }
 
 # ============================================================
