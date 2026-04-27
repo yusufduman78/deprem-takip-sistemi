@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Ortam
+.env
+firebase-credentials.json
+
+# Log
+bridge.log
+
+# IDE
+.vscode/
+.idea/
+
+# Gecici dosyalar
+*.txt
+read_docx.py
