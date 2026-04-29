@@ -1,10 +1,10 @@
 """
-Sistem Performans Izleyicisi (Watchdog)
+System Health Watchdog
 
-Sorumluluk: Uygulamanin aylar boyunca kesintisiz calisabilmesi icin
-RAM, CPU ve is parcacigi (Thread) kullanimlarini anlik olarak izler.
-Eger tehlikeli bir artis veya 'memory leak' (bellek sizintisi) fark ederse
-loglara kritik uyari birakir.
+Monitors process-level CPU, RAM, and thread usage at regular intervals.
+Publishes telemetry data (including network latency, active sensor count,
+and pending queue size) to the system/health MQTT channel for dashboard
+visualization. Raises critical log alerts on resource exhaustion.
 """
 
 import os
@@ -16,25 +16,23 @@ import socket
 
 logger = logging.getLogger("Watchdog")
 
-# Yapilandirma
-WATCHDOG_INTERVAL = 60  # Her 60 saniyede bir kontrol et
-MAX_RAM_PERCENT = 80.0  # RAM kullanimi bu yuzdeyi asarsa uyar
-MAX_CPU_PERCENT = 90.0  # CPU kullanimi bu yuzdeyi asarsa uyar
+# Configuration
+WATCHDOG_INTERVAL = 60  # Health check interval in seconds
+MAX_RAM_PERCENT = 80.0  # System RAM usage threshold for critical alert
+MAX_CPU_PERCENT = 90.0  # Process CPU usage threshold for warning
 
 
 def get_process_metrics():
-    """Mevcut Python surecinin (process) RAM ve CPU degerlerini alir."""
+    """Collect CPU, RAM, and thread metrics for the current Python process."""
     process = psutil.Process(os.getpid())
-    
-    # Process-specific metrics
+
     mem_info = process.memory_info()
     ram_mb = mem_info.rss / (1024 * 1024)
     cpu_percent = process.cpu_percent(interval=0.1)
     threads = process.num_threads()
-    
-    # System-wide metrics
+
     system_mem = psutil.virtual_memory()
-    
+
     return {
         "ram_mb": ram_mb,
         "cpu_percent": cpu_percent,
@@ -43,10 +41,9 @@ def get_process_metrics():
     }
 
 def measure_latency(host="broker.hivemq.com", port=1883, timeout=3):
-    """Bulut sunucusuna TCP baglantisi acarak ag gecikmesini (Ping) olcer."""
+    """Measure TCP connection latency to the MQTT broker in milliseconds."""
     start = time.time()
     try:
-        # Sadece baglanti acip hizlica kapatiyoruz (Yuku sifira indirmek icin)
         socket.create_connection((host, port), timeout=timeout).close()
         return int((time.time() - start) * 1000)
     except Exception:
@@ -55,13 +52,13 @@ def measure_latency(host="broker.hivemq.com", port=1883, timeout=3):
 
 def watchdog_loop(stop_event, start_time, mqtt_client=None, health_topic=None, message_queue=None, last_seen_times=None):
     """
-    Arka planda sonsuz dongude calisan izleyici.
-    stop_event tetiklenmedigi surece sistemi analiz eder.
+    Background loop that periodically collects system metrics and
+    publishes a JSON telemetry payload to the health MQTT channel.
+    Runs until stop_event is set.
     """
-    logger.info("Watchdog servisi baslatildi. Sistem sagligi izleniyor...")
-    
+    logger.info("Watchdog service started. Monitoring system health...")
+
     while not stop_event.is_set():
-        # Uyuma suresini parcalara bol ki stop_event hizli algilansin
         stop_event.wait(WATCHDOG_INTERVAL)
         if stop_event.is_set():
             break
@@ -72,31 +69,31 @@ def watchdog_loop(stop_event, start_time, mqtt_client=None, health_topic=None, m
             uptime_hours = uptime_seconds / 3600.0
 
             log_msg = (
-                f"Sistem Sagligi | Uptime: {uptime_hours:.1f} saat | "
-                f"RAM (App): {metrics['ram_mb']:.1f} MB | "
+                f"Health Check | Uptime: {uptime_hours:.1f}h | "
+                f"RAM: {metrics['ram_mb']:.1f} MB | "
                 f"Threads: {metrics['threads']} | "
                 f"CPU: {metrics['cpu_percent']}%"
             )
 
-            # Eger her sey normalse sadece INFO seviyesinde yaz (veya DEBUG da yapilabilir)
+            # Log level based on resource thresholds
             if metrics['sys_ram_percent'] > MAX_RAM_PERCENT:
-                logger.critical("!!! TEHLIKE: SISTEM RAM KULLANIMI %%%.1f !!!", metrics['sys_ram_percent'])
+                logger.critical("CRITICAL: System RAM usage at %.1f%%", metrics['sys_ram_percent'])
             elif metrics['cpu_percent'] > MAX_CPU_PERCENT:
-                logger.warning("! UYARI: YUKSEK CPU KULLANIMI %%%.1f", metrics['cpu_percent'])
+                logger.warning("WARNING: High CPU usage at %.1f%%", metrics['cpu_percent'])
             else:
                 logger.info(log_msg)
 
-            # Eger MQTT client verilmis ise, veriyi JSON olarak yayinla (Frontend icin)
+            # Publish telemetry JSON to MQTT for dashboard consumption
             if mqtt_client and health_topic:
                 q_size = message_queue.size if message_queue else 0
-                
-                # Aktif cihazlari say (Son 10 saniye icinde ses verenler)
+
+                # Count sensors active within the last 10 seconds
                 active_count = 0
                 if last_seen_times:
                     now = time.time()
                     active_count = sum(1 for t in last_seen_times.values() if now - t <= 10.0)
-                
-                # Ag Gecikmesini (Ping) olc
+
+                # Measure network latency to MQTT broker
                 latency = measure_latency()
 
                 payload = json.dumps({
@@ -113,4 +110,4 @@ def watchdog_loop(stop_event, start_time, mqtt_client=None, health_topic=None, m
                 mqtt_client.publish(health_topic, payload)
 
         except Exception as e:
-            logger.error("Watchdog metrikleri okurken hata aldi: %s", e)
+            logger.error("Watchdog metrics collection failed: %s", e)

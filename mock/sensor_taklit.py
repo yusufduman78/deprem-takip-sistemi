@@ -1,15 +1,14 @@
 """
-Sensor Taklit Scripti (Mock Sensor) - Interaktif Mod
+Mock Sensor Simulator - Interactive Mode
 
-Bu script, fiziksel NodeMCU ve MPU6050 sensoru olmadan sistemi test etmek icin
-sahte deprem verisi ureterek MQTT broker'a gonderir.
+Generates synthetic seismic data and publishes it to the MQTT broker,
+simulating a physical NodeMCU + MPU6050 sensor station. Supports
+LWT (Last Will and Testament) for disconnect detection.
 
-Interaktif Mod:
-  - Calistirdiginda otomatik olarak 3 saniyede bir normal veri yollar.
-  - ENTER tusuna bastiginizda aninda deprem verisi tetiklenir.
-  - Ctrl+C ile kapatilir.
+Normal data is published automatically at a configurable interval.
+Press ENTER at any time to inject a simulated earthquake event.
 
-Kullanim:
+Usage:
     conda activate depremenv
     python -m mock.sensor_taklit
 """
@@ -23,21 +22,21 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 
 # ============================================================
-# YAPILANDIRMA
+# CONFIGURATION
 # ============================================================
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
 DEVICE_ID = "SENSOR_01"
 TOPIC = f"sensors/{DEVICE_ID}/data"
-NORMAL_INTERVAL = 3  # saniye - normal veri gonderme araligi
+NORMAL_INTERVAL = 3  # seconds between normal data packets
 
 
 # ============================================================
-# SAHTE VERI URETICI
+# DATA GENERATORS
 # ============================================================
 
 def generate_normal_data():
-    """Normal (deprem yok) durumda sensorden gelecek tipik veri."""
+    """Generate a typical non-earthquake sensor reading."""
     return {
         "device_id": DEVICE_ID,
         "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -51,7 +50,7 @@ def generate_normal_data():
 
 
 def generate_earthquake_data():
-    """Deprem algilandiginda sensorden gelecek alarm verisi."""
+    """Generate a simulated earthquake alarm reading."""
     return {
         "device_id": DEVICE_ID,
         "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -65,11 +64,11 @@ def generate_earthquake_data():
 
 
 # ============================================================
-# NORMAL VERI GONDERICI (Arka Plan Threadi)
+# BACKGROUND DATA LOOP
 # ============================================================
 
 def normal_data_loop(client, stop_event):
-    """Arka planda belirli araliklarla normal veri gonderir."""
+    """Continuously publish normal sensor data at the configured interval."""
     count = 0
     while not stop_event.is_set():
         count += 1
@@ -79,21 +78,21 @@ def normal_data_loop(client, stop_event):
         print(
             f"  [NORMAL #{count}] PGA: {data['pga']:.3f} | "
             f"Richter: {data['richter']:.1f} | "
-            f"Zaman: {data['timestamp']}"
+            f"Time: {data['timestamp']}"
         )
         stop_event.wait(NORMAL_INTERVAL)
 
 
 # ============================================================
-# ANA FONKSIYON
+# MAIN ENTRY POINT
 # ============================================================
 
 def main():
     print("=" * 60)
-    print("  Sensor Taklit Scripti - Interaktif Mod")
+    print("  Mock Sensor Simulator - Interactive Mode")
     print(f"  Broker : {MQTT_BROKER}:{MQTT_PORT}")
     print(f"  Topic  : {TOPIC}")
-    print(f"  Aralik : Her {NORMAL_INTERVAL} saniyede normal veri")
+    print(f"  Rate   : Every {NORMAL_INTERVAL}s (normal data)")
     print("=" * 60)
 
     client = mqtt.Client(
@@ -102,17 +101,17 @@ def main():
         protocol=mqtt.MQTTv311,
     )
 
-    # LWT (Son Vasiyet) Ayari: Eger sensor aniden koparsa Broker bu mesaji otomatik yollar
+    # Configure LWT: broker publishes OFFLINE if this client disconnects unexpectedly
     client.will_set(f"sensors/{DEVICE_ID}/status", payload="OFFLINE", qos=1, retain=True)
 
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    
-    # Baglaninca durumumuzu ONLINE yapalim
+
+    # Announce ONLINE status on connect
     client.publish(f"sensors/{DEVICE_ID}/status", payload="ONLINE", qos=1, retain=True)
-    
+
     client.loop_start()
 
-    # Arka planda normal veri gonderimini baslat
+    # Start background normal data generation
     stop_event = threading.Event()
     bg_thread = threading.Thread(
         target=normal_data_loop,
@@ -122,22 +121,22 @@ def main():
     bg_thread.start()
 
     print()
-    print("  >> ENTER tusuna basarak DEPREM tetikleyin")
-    print("  >> Ctrl+C ile cikis yapin")
+    print("  >> Press ENTER to trigger an earthquake event")
+    print("  >> Press Ctrl+C to exit")
     print()
 
     try:
         while True:
-            input()  # ENTER bekle
+            input()
             eq_data = generate_earthquake_data()
             eq_payload = json.dumps(eq_data)
             client.publish(TOPIC, eq_payload)
             print()
             print("*" * 60)
             print(
-                f"  [DEPREM!] Richter: {eq_data['richter']:.1f} | "
+                f"  [EARTHQUAKE] Richter: {eq_data['richter']:.1f} | "
                 f"PGA: {eq_data['pga']:.2f} | "
-                f"Zaman: {eq_data['timestamp']}"
+                f"Time: {eq_data['timestamp']}"
             )
             print("*" * 60)
             print()
@@ -148,7 +147,7 @@ def main():
         bg_thread.join(timeout=2)
         client.loop_stop()
         client.disconnect()
-        print("\n[KAPANIYOR] Sensor kapatildi.")
+        print("\n[SHUTDOWN] Sensor simulator stopped.")
 
 
 if __name__ == "__main__":

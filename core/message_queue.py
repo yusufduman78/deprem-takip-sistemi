@@ -1,9 +1,9 @@
 """
-Mesaj Kuyrugu (Message Queue)
+In-Memory Message Queue (Fault-Tolerance Layer)
 
-Sorumluluk: Internet veya MQTT baglantisi koptiginda mesajlari
-RAM'de guvenle saklar. Baglanti geldiginde kuyruktaki mesajlari
-FIFO (First In, First Out) sirasina gore bosaltir.
+Provides a bounded FIFO buffer for messages that fail to reach
+Firebase due to network outages. When connectivity is restored,
+the queue is flushed in order, ensuring zero data loss.
 """
 
 import json
@@ -17,8 +17,8 @@ logger = logging.getLogger("MessageQueue")
 
 class MessageQueue:
     """
-    Thread-safe olmayan, hafif bir FIFO kuyrugu.
-    Maksimum boyutu astiginda en eski mesaji otomatik olarak atar (deque maxlen).
+    Lightweight bounded FIFO queue backed by collections.deque.
+    Not thread-safe; intended for single-threaded producer/consumer patterns.
     """
 
     def __init__(self, max_size: int = MESSAGE_QUEUE_MAX_SIZE):
@@ -26,30 +26,28 @@ class MessageQueue:
         self._max_size = max_size
 
     def enqueue(self, topic: str, data: dict):
-        """Mesaji kuyruga ekler. Kuyruk doluysa en eski mesaj atilir."""
+        """Add a message to the queue. Oldest entry is evicted if at capacity."""
         entry = {
             "topic": topic,
             "payload": json.dumps(data),
         }
         self._queue.append(entry)
         logger.info(
-            "Kuyruga eklendi (%d/%d) | Topic: %s",
+            "Enqueued (%d/%d) | Topic: %s",
             len(self._queue), self._max_size, topic,
         )
 
     def dequeue(self):
-        """Kuyruktaki en eski mesaji cikarir ve doner. Kuyruk bossa None doner."""
+        """Remove and return the oldest message. Returns None if empty."""
         if self._queue:
             return self._queue.popleft()
         return None
 
     def flush(self, publish_fn):
         """
-        Tum kuyruktaki mesajlari sirayla publish_fn ile gonderir.
-        publish_fn imzasi: publish_fn(topic: str, payload: str)
-
-        Returns:
-            int: Basariyla gonderilen mesaj sayisi.
+        Deliver all queued messages via publish_fn(topic, payload).
+        Re-queues at front on failure to preserve FIFO order.
+        Returns number of messages successfully delivered.
         """
         sent_count = 0
         while self._queue:
@@ -57,22 +55,21 @@ class MessageQueue:
             try:
                 publish_fn(entry["topic"], entry["payload"])
                 sent_count += 1
-                logger.info("Kuyruktan gonderildi -> %s", entry["topic"])
+                logger.info("Delivered from queue -> %s", entry["topic"])
             except Exception as e:
-                # Gonderilemedi, tekrar kuyruga koy (basa ekle)
                 self._queue.appendleft(entry)
-                logger.error("Kuyruk bosaltma hatasi, durduruluyor: %s", e)
+                logger.error("Queue flush interrupted: %s", e)
                 break
         if sent_count > 0:
-            logger.info("Kuyruk bosaltildi: %d mesaj gonderildi.", sent_count)
+            logger.info("Queue flush complete: %d messages delivered.", sent_count)
         return sent_count
 
     @property
     def size(self):
-        """Kuyruktaki mevcut mesaj sayisi."""
+        """Current number of messages in the queue."""
         return len(self._queue)
 
     @property
     def is_empty(self):
-        """Kuyruk bos mu?"""
+        """Whether the queue contains zero messages."""
         return len(self._queue) == 0

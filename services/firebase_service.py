@@ -1,13 +1,14 @@
 """
-Firebase Servisi
+Firebase Realtime Database Service
 
-Sorumluluk: Firebase Realtime Database'e deprem/sensor verisi yazma.
-MQTT'den veya JSON'dan habersizdir; sadece kendisine verilen
-Python dict'i Firebase'e push eder.
+Handles initialization of the Firebase Admin SDK and provides
+a write interface for persisting earthquake event data. This
+module is storage-only; it has no knowledge of MQTT or message
+routing. Data is written exactly as received, with no
+additional transformation.
 """
 
 import logging
-from datetime import datetime, timezone
 
 import firebase_admin
 from firebase_admin import credentials, db
@@ -22,19 +23,19 @@ logger = logging.getLogger("FirebaseService")
 
 
 class FirebaseService:
-    """Firebase Realtime Database ile iletisimi yoneten sinif."""
+    """Manages connection and write operations to Firebase Realtime Database."""
 
     def __init__(self):
         self._connected = False
-        self._ref = None  # database referansi
+        self._ref = None
 
     def connect(self):
         """
-        Firebase Admin SDK'yi baslatir ve veritabani referansini olusturur.
-        Bu metod uygulama baslatildiginda bir kez cagrilir.
+        Initialize the Firebase Admin SDK and obtain a database reference.
+        Called once at application startup.
         """
         if not FIREBASE_DATABASE_URL:
-            logger.error("FIREBASE_DATABASE_URL bos! .env dosyasini kontrol edin.")
+            logger.error("FIREBASE_DATABASE_URL is empty. Check .env file.")
             return
 
         try:
@@ -45,36 +46,36 @@ class FirebaseService:
             self._ref = db.reference(FIREBASE_DB_NODE)
             self._connected = True
             logger.info(
-                "Firebase baglantisi basarili | DB: %s | Node: /%s",
+                "Firebase connected | URL: %s | Node: /%s",
                 FIREBASE_DATABASE_URL, FIREBASE_DB_NODE,
             )
         except FileNotFoundError:
             logger.critical(
-                "Kimlik dosyasi bulunamadi: %s", FIREBASE_CREDENTIALS_PATH
+                "Credentials file not found: %s", FIREBASE_CREDENTIALS_PATH
             )
         except Exception as e:
-            logger.critical("Firebase baslatilamadi: %s", e)
+            logger.critical("Firebase initialization failed: %s", e)
 
     def write_event(self, data: dict) -> bool:
         """
-        Deprem/sensor verisini Firebase Realtime Database'e push eder.
-        Her kayit benzersiz bir ID ile /earthquake_events altina eklenir.
+        Push an earthquake/sensor event to Firebase Realtime Database.
+        Each record is assigned a unique auto-generated key under
+        the configured database node.
 
         Args:
-            data: Sensor verisini iceren dict (device_id, richter, pga, vb.)
+            data: Sensor event dictionary (device_id, richter, pga, etc.)
 
         Returns:
-            bool: Yazma basarili ise True, degilse False.
+            True if the write succeeded, False otherwise.
         """
         if not self._connected or self._ref is None:
-            logger.warning("Firebase bagli degil, veri yazilamadi.")
+            logger.warning("Firebase not connected. Write skipped.")
             return False
 
         try:
-            # push() her kayda benzersiz bir ID atar (ornek: -NxYz123...)
             new_ref = self._ref.push(data)
             logger.info(
-                "Firebase'e yazildi | ID: %s | Cihaz: %s | Richter: %s",
+                "Written to Firebase | ID: %s | Device: %s | Richter: %s",
                 new_ref.key,
                 data.get("device_id", "?"),
                 data.get("richter", "?"),
@@ -82,7 +83,7 @@ class FirebaseService:
             return True
 
         except Exception as e:
-            logger.error("Firebase yazma hatasi: %s", e)
+            logger.error("Firebase write error: %s", e)
             return False
 
     @property

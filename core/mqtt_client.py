@@ -1,9 +1,11 @@
 """
-MQTT Client Yonetimi
+MQTT Client Manager
 
-Sorumluluk: Sadece MQTT broker baglantisi, subscribe/publish islemleri
-ve otomatik yeniden baglanma (reconnect). JSON'in ne oldugunu bilmez,
-sadece ham mesajlari alir ve kayitli callback'e iletir.
+Manages the connection lifecycle with the MQTT broker: connect,
+subscribe, publish, and automatic reconnection with exponential
+backoff. This module is transport-only; it has no knowledge of
+JSON structure or message semantics. Raw payloads are forwarded
+to the registered external callback for processing.
 """
 
 import logging
@@ -24,13 +26,13 @@ logger = logging.getLogger("MQTTClient")
 
 
 class MQTTClient:
-    """MQTT broker ile tum iletisimi yoneten sinif."""
+    """Encapsulates all MQTT broker communication."""
 
     def __init__(self, on_message_callback=None):
         """
         Args:
-            on_message_callback: Mesaj geldiginde cagrilacak dis fonksiyon.
-                Imzasi: callback(topic: str, payload: str) seklinde olmali.
+            on_message_callback: External function invoked on every incoming message.
+                Expected signature: callback(topic: str, payload: str)
         """
         self._external_callback = on_message_callback
 
@@ -40,81 +42,82 @@ class MQTTClient:
             protocol=mqtt.MQTTv311,
         )
 
-        # Dahili callback'leri bagla
+        # Bind internal event handlers
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
 
-        # Otomatik yeniden baglanma ayarlari
+        # Configure automatic reconnection with exponential backoff
         self._client.reconnect_delay_set(
             min_delay=MQTT_RECONNECT_MIN_DELAY,
             max_delay=MQTT_RECONNECT_MAX_DELAY,
         )
 
     # ----------------------------------------------------------
-    # PUBLIC METODLAR
+    # PUBLIC API
     # ----------------------------------------------------------
 
     def connect(self):
-        """Broker'a baglanir."""
-        logger.info("Baglaniliyor: %s:%d ...", MQTT_BROKER, MQTT_PORT)
+        """Establish connection to the MQTT broker."""
+        logger.info("Connecting to %s:%d ...", MQTT_BROKER, MQTT_PORT)
         try:
             self._client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
         except Exception as e:
-            logger.critical("Broker'a baglanilamadi: %s", e)
+            logger.critical("Failed to connect to broker: %s", e)
             raise
 
     def start(self):
-        """Sonsuz dongude mesajlari dinlemeye baslar (blocking)."""
-        logger.info("Dinleme dongusu baslatiliyor (loop_forever)...")
+        """Enter the blocking event loop. Processes messages until interrupted."""
+        logger.info("Starting blocking event loop (loop_forever)...")
         self._client.loop_forever()
 
     def stop(self):
-        """Baglantilari duzgunce kapatir."""
+        """Gracefully disconnect from the broker."""
         self._client.disconnect()
-        logger.info("MQTT baglantisi kapatildi.")
+        logger.info("MQTT connection closed.")
 
     def publish(self, topic: str, payload: str):
-        """Belirtilen topic'e mesaj yayinlar."""
+        """Publish a message to the specified topic."""
         result = self._client.publish(topic, payload)
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            logger.debug("Publish basarili -> %s", topic)
+            logger.debug("Published -> %s", topic)
         else:
-            logger.warning("Publish basarisiz -> %s (rc=%s)", topic, result.rc)
+            logger.warning("Publish failed -> %s (rc=%s)", topic, result.rc)
         return result
 
     # ----------------------------------------------------------
-    # DAHILI CALLBACK'LER
+    # INTERNAL EVENT HANDLERS
     # ----------------------------------------------------------
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
-        """Broker'a baglanildiginda cagrilir. Topic aboneliklerini kurar."""
+        """Called when connection to the broker is established. Subscribes to all configured topics."""
         if reason_code == 0:
-            logger.info("MQTT Broker'a baglanti basarili: %s:%d", MQTT_BROKER, MQTT_PORT)
-            # Tum dinlenecek topic'lere abone ol
+            logger.info("Connected to MQTT broker: %s:%d", MQTT_BROKER, MQTT_PORT)
+            # Subscribe to all topics except cloud_events (outbound-only channel)
             for name, topic in TOPICS.items():
-                if name != "cloud_events":  # cloud_events'e biz yaziyoruz, dinlemiyoruz
+                if name not in ("cloud_events", "system_health"):
                     client.subscribe(topic)
-                    logger.info("Abone olundu: %s", topic)
+                    logger.info("Subscribed: %s", topic)
         else:
-            logger.error("Broker baglanti hatasi! Kod: %s", reason_code)
+            logger.error("Broker connection failed. Code: %s", reason_code)
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties):
-        """Baglanti kesildiginde cagrilir."""
+        """Called when the broker connection is lost. Paho handles automatic reconnection."""
         if reason_code != 0:
             logger.warning(
-                "Broker baglantisi kesildi (Kod: %s). Yeniden baglaniliyor...",
+                "Broker connection lost (code: %s). Auto-reconnecting...",
                 reason_code,
             )
 
     def _on_message(self, client, userdata, msg):
         """
-        Ham mesaji alir ve kayitli dis callback'e iletir.
-        Bu sinif JSON parse YAPMAZ, sadece topic ve payload'u iletir.
+        Called for every incoming message. Decodes the payload and
+        forwards it to the registered external callback. No JSON
+        parsing is performed at this layer.
         """
         topic = msg.topic
         payload = msg.payload.decode("utf-8", errors="replace")
-        logger.debug("Ham mesaj alindi | Topic: %s", topic)
+        logger.debug("Raw message received | Topic: %s", topic)
 
         if self._external_callback:
             self._external_callback(topic, payload)

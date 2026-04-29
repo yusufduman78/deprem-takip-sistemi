@@ -1,9 +1,12 @@
 """
-Mesaj Yonlendirici (Message Handler / Router)
+Message Handler / Router
 
-Sorumluluk: Gelen ham MQTT mesajlarini JSON olarak parse eder,
-dogrular (validation), ve icerigine gore dogru servise yonlendirir.
-MQTT veya Firebase'den habersizdir; sadece veriyi isler.
+Parses incoming raw MQTT payloads into JSON, validates required fields,
+stamps each packet with a server-side UTC timestamp, and dispatches
+the data to the appropriate registered callbacks based on topic.
+
+This module has no knowledge of MQTT transport or Firebase storage;
+it operates purely on data transformation and routing.
 """
 
 import json
@@ -17,54 +20,48 @@ logger = logging.getLogger("MessageHandler")
 
 class MessageHandler:
     """
-    Gelen MQTT mesajlarini isleyen ve yonlendiren sinif.
+    Central message router for incoming MQTT messages.
 
-    Dis servisler (Firebase, Alert vb.) callback olarak kaydedilir.
-    Boylece MessageHandler hicbir servise dogrudan bagimli degildir.
+    External services (Firebase, alerting, etc.) register themselves
+    as callbacks. This decouples the handler from any specific service
+    implementation.
     """
 
     def __init__(self):
-        # Deprem verisi geldiginde cagrilacak callback listesi
         self._on_sensor_data_callbacks = []
-        # Deprem alarmi geldiginde cagrilacak callback listesi
         self._on_earthquake_callbacks = []
-        # Komut geldiginde cagrilacak callback listesi
         self._on_command_callbacks = []
-        # Sensor durum degisimi (LWT) geldiginde cagrilacak callback listesi
         self._on_sensor_status_callbacks = []
 
     # ----------------------------------------------------------
-    # CALLBACK KAYIT METODLARI
+    # CALLBACK REGISTRATION
     # ----------------------------------------------------------
 
     def register_sensor_data_handler(self, callback):
-        """Her sensor verisi geldiginde cagrilacak fonksiyonu kaydeder.
-        Imza: callback(data: dict)"""
+        """Register a callback for normal sensor data. Signature: callback(data: dict)"""
         self._on_sensor_data_callbacks.append(callback)
 
     def register_earthquake_handler(self, callback):
-        """Deprem alarmi tetiklendiginde cagrilacak fonksiyonu kaydeder.
-        Imza: callback(data: dict)"""
+        """Register a callback for earthquake alarm events. Signature: callback(data: dict)"""
         self._on_earthquake_callbacks.append(callback)
 
     def register_command_handler(self, callback):
-        """Komut mesaji geldiginde cagrilacak fonksiyonu kaydeder.
-        Imza: callback(data: dict)"""
+        """Register a callback for control commands. Signature: callback(data: dict)"""
         self._on_command_callbacks.append(callback)
 
     def register_sensor_status_handler(self, callback):
-        """Sensor koptugunda veya baglandiginda (LWT) cagrilacak fonksiyon.
-        Imza: callback(device_id: str, status: str)"""
+        """Register a callback for LWT status changes. Signature: callback(device_id: str, status: str)"""
         self._on_sensor_status_callbacks.append(callback)
 
     # ----------------------------------------------------------
-    # ANA YONLENDIRME (ROUTER)
+    # MAIN ROUTER
     # ----------------------------------------------------------
 
     def handle_message(self, topic: str, raw_payload: str):
         """
-        MQTT'den gelen ham mesaji topic'e gore dogru isleyiciye yonlendirir.
-        Bu metod MQTTClient'in on_message callback'i olarak kaydedilir.
+        Entry point for all incoming MQTT messages.
+        Routes to the appropriate processor based on topic pattern.
+        Registered as the on_message callback for MQTTClient.
         """
         if topic.startswith("sensors/") and topic.endswith("/data"):
             self._process_sensor_data(topic, raw_payload)
@@ -73,28 +70,34 @@ class MessageHandler:
         elif topic == "commands/main":
             self._process_command(raw_payload)
         else:
-            logger.debug("Bilinmeyen topic: %s", topic)
+            logger.debug("Unrecognized topic: %s", topic)
 
     # ----------------------------------------------------------
-    # SENSOR VERISI ISLEME
+    # SENSOR DATA PROCESSING
     # ----------------------------------------------------------
 
     def _process_sensor_data(self, topic: str, raw_payload: str):
-        """Sensor verisini parse eder, dogrular ve callback'leri tetikler."""
+        """
+        Processes incoming sensor data packets:
+        1. Parses JSON payload
+        2. Stamps with server-side UTC timestamp (authoritative time source)
+        3. Validates required fields
+        4. Dispatches to earthquake or normal-data callbacks
+        """
 
-        # 1. JSON Parse
+        # 1. Parse JSON
         data = self._safe_parse_json(raw_payload)
         if data is None:
             return
 
-        # 1.a Zaman Damgası Ekle (Merkezi olarak burada ekliyoruz)
+        # 2. Inject server timestamp at the earliest possible stage
         data["server_timestamp"] = datetime.now(timezone.utc).isoformat()
 
-        # 2. Alan dogrulama (validation)
+        # 3. Validate required fields
         if not self._validate_fields(data, REQUIRED_SENSOR_FIELDS):
             return
 
-        # 3. Veriyi logla
+        # 4. Extract key fields for logging and routing
         device_id = data["device_id"]
         deprem_flag = data["deprem_flag"]
         richter = data["richter"]
@@ -103,85 +106,89 @@ class MessageHandler:
 
         if deprem_flag:
             logger.warning(
-                "DEPREM ALARMI! | Cihaz: %s | Richter: %.1f | PGA: %.2f | Zaman: %s",
+                "EARTHQUAKE ALARM | Device: %s | Richter: %.1f | PGA: %.2f | Time: %s",
                 device_id, richter, pga, timestamp,
             )
-            # Deprem callback'lerini tetikle
+            # Dispatch to earthquake-specific callbacks
             for cb in self._on_earthquake_callbacks:
                 try:
                     cb(data)
                 except Exception as e:
-                    logger.error("Earthquake callback hatasi: %s", e)
+                    logger.error("Earthquake callback error: %s", e)
         else:
             logger.info(
-                "Normal veri   | Cihaz: %s | Richter: %.1f | PGA: %.2f | Zaman: %s",
+                "Normal data    | Device: %s | Richter: %.1f | PGA: %.2f | Time: %s",
                 device_id, richter, pga, timestamp,
             )
 
+        # Dispatch to general sensor data callbacks (runs for both normal and alarm)
         for cb in self._on_sensor_data_callbacks:
             try:
                 cb(data)
             except Exception as e:
-                logger.error("Sensor data callback hatasi: %s", e)
+                logger.error("Sensor data callback error: %s", e)
 
     # ----------------------------------------------------------
-    # SENSOR DURUM (LWT) ISLEME
+    # SENSOR STATUS (LWT) PROCESSING
     # ----------------------------------------------------------
 
     def _process_sensor_status(self, topic: str, raw_payload: str):
-        """Sensor koptugunda (OFFLINE) veya baglandiginda gelen formati isler."""
-        # Topic formatı: sensors/SENSOR_01/status
+        """
+        Processes LWT (Last Will and Testament) messages.
+        Topic format: sensors/{device_id}/status
+        Payload: plain text status string (e.g., "OFFLINE", "ONLINE")
+        """
         try:
             device_id = topic.split("/")[1]
             status = raw_payload.strip().upper()
-            
+
             if status == "OFFLINE":
-                logger.critical("!!! ALARM !!! SENSOR KOPTU: %s", device_id)
+                logger.critical("SENSOR DISCONNECTED: %s", device_id)
             else:
-                logger.info("Sensor durumu guncellendi: %s -> %s", device_id, status)
-                
+                logger.info("Sensor status update: %s -> %s", device_id, status)
+
             for cb in self._on_sensor_status_callbacks:
                 cb(device_id, status)
         except Exception as e:
-            logger.error("Sensor status islenirken hata: %s", e)
+            logger.error("Error processing sensor status: %s", e)
 
     # ----------------------------------------------------------
-    # KOMUT ISLEME
+    # COMMAND PROCESSING
     # ----------------------------------------------------------
 
     def _process_command(self, raw_payload: str):
-        """Ana Istasyondan gelen komutlari isler."""
+        """Processes control commands from the main station (e.g., silence, acknowledge)."""
         data = self._safe_parse_json(raw_payload)
         if data is None:
             return
 
-        command = data.get("command", "bilinmiyor")
-        logger.info("Komut alindi: %s | Detay: %s", command, data)
+        command = data.get("command", "unknown")
+        logger.info("Command received: %s | Detail: %s", command, data)
 
         for cb in self._on_command_callbacks:
             try:
                 cb(data)
             except Exception as e:
-                logger.error("Command callback hatasi: %s", e)
+                logger.error("Command callback error: %s", e)
 
     # ----------------------------------------------------------
-    # YARDIMCI METODLAR
+    # UTILITY METHODS
     # ----------------------------------------------------------
 
     @staticmethod
     def _safe_parse_json(raw: str):
-        """JSON parse eder, hata olursa None doner. Sistem cokmez."""
+        """Parse JSON safely. Returns None on failure without crashing the system."""
         try:
             return json.loads(raw)
         except json.JSONDecodeError as e:
-            logger.error("Hatali JSON paketi atildi: %s | Hata: %s", raw[:100], e)
+            logger.error("Malformed JSON discarded: %s | Error: %s", raw[:100], e)
             return None
 
     @staticmethod
     def _validate_fields(data: dict, required: list) -> bool:
-        """Gerekli alanlarin JSON icinde var olup olmadigini kontrol eder."""
+        """Verify that all required fields are present in the parsed data."""
         missing = [f for f in required if f not in data]
         if missing:
-            logger.error("Eksik alanlar: %s | Paket: %s", missing, data)
+            logger.error("Missing required fields: %s | Packet: %s", missing, data)
             return False
         return True
