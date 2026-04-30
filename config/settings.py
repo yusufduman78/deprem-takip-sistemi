@@ -44,6 +44,13 @@ TOPICS = {
 }
 
 # ============================================================
+# DEVICE FILTERING (Public Broker Noise Reduction)
+# ============================================================
+# Only devices whose ID starts with this prefix are processed.
+# All other messages from the public broker are silently ignored.
+ALLOWED_DEVICE_PREFIX = "SENSOR_"
+
+# ============================================================
 # JSON VALIDATION
 # ============================================================
 REQUIRED_SENSOR_FIELDS = [

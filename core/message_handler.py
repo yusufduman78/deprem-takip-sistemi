@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from config.settings import REQUIRED_SENSOR_FIELDS
+from config.settings import REQUIRED_SENSOR_FIELDS, ALLOWED_DEVICE_PREFIX
 
 logger = logging.getLogger("MessageHandler")
 
@@ -61,8 +61,15 @@ class MessageHandler:
         """
         Entry point for all incoming MQTT messages.
         Routes to the appropriate processor based on topic pattern.
+        Filters out devices that don't match ALLOWED_DEVICE_PREFIX.
         Registered as the on_message callback for MQTTClient.
         """
+        # Extract device_id from topic (sensors/{device_id}/data or /status)
+        if topic.startswith("sensors/") and "/" in topic[8:]:
+            device_id = topic.split("/")[1]
+            if not device_id.upper().startswith(ALLOWED_DEVICE_PREFIX):
+                return  # Silently ignore non-project devices
+
         if topic.startswith("sensors/") and topic.endswith("/data"):
             self._process_sensor_data(topic, raw_payload)
         elif topic.startswith("sensors/") and topic.endswith("/status"):

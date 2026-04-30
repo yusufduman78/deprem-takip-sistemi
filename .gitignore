@@ -1,18 +1,32 @@
-# Python
-__pycache__/
+# Python Caches
+**/__pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Ortam
+# Environment and Secrets (CRITICAL FOR SECURITY)
 .env
+.env.*
+*.env
 firebase-credentials.json
 
-# Log
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Logs
+*.log
 bridge.log
 
-# IDE
+# IDE and System Files
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
 
-# Gecici dosyalar
-*.txt
+# Build and Temporary Files
+dist/
+frontend/dist/
+scratch/
 read_docx.py
+*.txt
