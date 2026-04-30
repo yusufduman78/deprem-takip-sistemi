@@ -12,4 +12,8 @@ export default defineConfig({
       '@': '/src',
     },
   },
+  server: {
+    host: true, // Expose to LAN for mobile testing
+    port: 5173,
+  },
 })

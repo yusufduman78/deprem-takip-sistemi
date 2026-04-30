@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { mqttService, TOPIC_EVENTS, TOPIC_HEALTH } from '../services/mqttService'
 import { subscribeToEarthquakeEvents } from '../services/firebaseService'
 import { getSettings, showLocalNotification } from '../services/notificationService'
+import { sendEarthquakeEmail, initEmailJS } from '../services/emailService'
 import { toast } from 'react-toastify'
 
 const EarthquakeContext = createContext(null)
@@ -22,6 +23,7 @@ export function EarthquakeProvider({ children }) {
   // MQTT: Connect on mount
   useEffect(() => {
     mqttService.connect(setMqttStatus)
+    initEmailJS() // Initialize EmailJS on app startup
 
     const handleEvent = (data) => {
       // Timeout/error message from bridge
@@ -47,7 +49,8 @@ export function EarthquakeProvider({ children }) {
       })
 
       // Earthquake alarm handling
-      if (data.deprem_flag === true) {
+      const isEarthquake = data.deprem_flag === true || data.deprem_flag === 'true' || data.deprem_flag === 1
+      if (isEarthquake) {
         setIsAlarm(true)
 
         const currentSettings = getSettings()
@@ -65,6 +68,23 @@ export function EarthquakeProvider({ children }) {
           `🔴 DEPREM ALARMI! Richter: ${data.richter?.toFixed(1) ?? '?'} | PGA: ${data.pga?.toFixed(3) ?? '?'} cm/s²`,
           { autoClose: 8000, toastId: 'earthquake-alarm' }
         )
+
+        // Email notification
+        console.log('[DTS] Email check:', { emailOn: currentSettings.emailNotifications, emailAddr: currentSettings.emailAddress })
+        if (currentSettings.emailNotifications && currentSettings.emailAddress) {
+          console.log('[DTS] Sending earthquake email to:', currentSettings.emailAddress)
+          sendEarthquakeEmail(data, currentSettings.emailAddress)
+            .then(sent => {
+              if (sent) toast.info('📧 E-posta uyarısı gönderildi', { toastId: 'email-sent', autoClose: 3000 })
+              else toast.warn('📧 E-posta gönderilemedi — konsolu kontrol edin', { toastId: 'email-fail', autoClose: 5000 })
+            })
+            .catch((err) => {
+              console.error('[DTS] Email send error:', err)
+              toast.error('📧 E-posta gönderim hatası', { toastId: 'email-error', autoClose: 5000 })
+            })
+        } else {
+          console.log('[DTS] Email skipped — notifications:', currentSettings.emailNotifications, 'address:', currentSettings.emailAddress)
+        }
 
         // Clear alarm after 30 seconds of no new alarm data
         if (alarmTimeoutRef.current) clearTimeout(alarmTimeoutRef.current)
