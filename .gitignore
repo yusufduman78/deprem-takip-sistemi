@@ -30,3 +30,6 @@ frontend/dist/
 scratch/
 read_docx.py
 *.txt
+
+# Documentation
+docs/

@@ -104,9 +104,26 @@ class MessageHandler:
         if not self._validate_fields(data, REQUIRED_SENSOR_FIELDS):
             return
 
-        # 4. Extract key fields for logging and routing
+        # 4. Normalize deprem_flag to proper boolean (hardware may send "true" as string)
+        raw_flag = data["deprem_flag"]
+        if isinstance(raw_flag, str):
+            data["deprem_flag"] = raw_flag.strip().lower() in ("true", "1", "yes")
+        else:
+            data["deprem_flag"] = bool(raw_flag)
+
+        # 5. Extract and normalize precision for numeric fields to prevent C++ JSON parser issues
         device_id = data["device_id"]
         deprem_flag = data["deprem_flag"]
+        
+        # Round to match Mock Sensor precision (1 decimal for richter, 2 for pga)
+        data["richter"] = round(float(data["richter"]), 1)
+        data["pga"] = round(float(data["pga"]), 2)
+        
+        # Round accel if they exist
+        for axis in ["accel_x", "accel_y", "accel_z"]:
+            if axis in data and data[axis] is not None:
+                data[axis] = round(float(data[axis]), 3)
+
         richter = data["richter"]
         pga = data["pga"]
         timestamp = data["timestamp"]
@@ -116,6 +133,9 @@ class MessageHandler:
                 "EARTHQUAKE ALARM | Device: %s | Richter: %.1f | PGA: %.2f | Time: %s",
                 device_id, richter, pga, timestamp,
             )
+            # Log the EXACT JSON payload for debugging
+            logger.warning("OUTBOUND JSON -> %s", json.dumps(data))
+            
             # Dispatch to earthquake-specific callbacks
             for cb in self._on_earthquake_callbacks:
                 try:

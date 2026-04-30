@@ -17,6 +17,7 @@ import json
 import time
 import random
 import threading
+import sys
 from datetime import datetime
 
 import paho.mqtt.client as mqtt
@@ -26,7 +27,7 @@ import paho.mqtt.client as mqtt
 # ============================================================
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
-DEVICE_ID = "SENSOR_01"
+DEVICE_ID = sys.argv[1] if len(sys.argv) > 1 else "SENSOR_01"
 TOPIC = f"sensors/{DEVICE_ID}/data"
 NORMAL_INTERVAL = 3  # seconds between normal data packets
 
