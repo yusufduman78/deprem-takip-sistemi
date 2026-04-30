@@ -1,10 +1,12 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useEffect, useRef } from 'react'
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
 } from 'recharts'
 import { useEarthquake } from '../context/EarthquakeContext'
+import { BarChart3, Package, AlertTriangle, Zap, TrendingUp, LineChart as ChartIcon, Radio, ListEnd } from 'lucide-react'
+import gsap from 'gsap'
 
 function fmt(ts) {
   if (!ts) return ''
@@ -16,11 +18,12 @@ function fmt(ts) {
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
-    <div style={{ background: 'rgba(19,24,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
-      <div style={{ color: '#94a3b8', marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'rgba(10, 10, 12, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px', fontSize: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+      <div style={{ color: '#a1a1aa', marginBottom: 8, fontWeight: 600 }}>{label}</div>
       {payload.map(p => (
-        <div key={p.dataKey} style={{ color: p.color }}>
-          {p.name}: <strong>{Number(p.value).toFixed(3)}</strong>
+        <div key={p.dataKey} style={{ color: p.color, marginBottom: 4, display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+          <span>{p.name}</span>
+          <strong>{Number(p.value).toFixed(3)}</strong>
         </div>
       ))}
     </div>
@@ -29,6 +32,19 @@ function CustomTooltip({ active, payload, label }) {
 
 export default function Statistics() {
   const { historicalEvents } = useEarthquake()
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    // GSAP Reveal Animation
+    const ctx = gsap.context(() => {
+      gsap.fromTo('.reveal-el', 
+        { y: 30, opacity: 0 }, 
+        { y: 0, opacity: 1, duration: 0.8, stagger: 0.08, ease: 'power3.out' }
+      )
+    }, containerRef)
+
+    return () => ctx.revert()
+  }, [])
 
   // Aggregate statistics
   const stats = useMemo(() => {
@@ -91,30 +107,33 @@ export default function Statistics() {
   }, [historicalEvents])
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <h1 className="page-title">📊 İstatistikler</h1>
+    <div className="page-container" ref={containerRef}>
+      <div className="page-header reveal-el">
+        <h1 className="page-title">
+          <BarChart3 size={32} className="text-primary" />
+          İstatistikler
+        </h1>
         <p className="page-subtitle">Firebase kayıtlarına dayalı grafiksel analiz</p>
       </div>
 
       {/* Summary Stats */}
-      <div className="stat-cards-grid" style={{ marginBottom: '1.5rem' }}>
-        <div className="stat-card" style={{ '--stat-color': 'var(--accent-primary)', '--stat-icon-bg': 'rgba(59,130,246,0.1)' }}>
-          <div className="stat-icon">📦</div>
+      <div className="stat-cards-grid reveal-el" style={{ marginBottom: '1.5rem' }}>
+        <div className="stat-card" style={{ '--stat-color': 'var(--accent-primary)' }}>
+          <div className="stat-icon"><Package size={24} /></div>
           <div className="stat-content">
             <div className="stat-label">Toplam Kayıt</div>
             <div className="stat-value">{stats?.total ?? 0}</div>
           </div>
         </div>
-        <div className="stat-card" style={{ '--stat-color': 'var(--accent-danger)', '--stat-icon-bg': 'rgba(239,68,68,0.1)' }}>
-          <div className="stat-icon">🚨</div>
+        <div className="stat-card" style={{ '--stat-color': 'var(--accent-danger)' }}>
+          <div className="stat-icon"><AlertTriangle size={24} /></div>
           <div className="stat-content">
             <div className="stat-label">Deprem Sayısı</div>
             <div className="stat-value" style={{ color: 'var(--accent-danger)' }}>{stats?.alarmCount ?? 0}</div>
           </div>
         </div>
-        <div className="stat-card" style={{ '--stat-color': 'var(--accent-warning)', '--stat-icon-bg': 'rgba(245,158,11,0.1)' }}>
-          <div className="stat-icon">⚡</div>
+        <div className="stat-card" style={{ '--stat-color': 'var(--accent-warning)' }}>
+          <div className="stat-icon"><Zap size={24} /></div>
           <div className="stat-content">
             <div className="stat-label">En Büyük Deprem</div>
             <div className="stat-value" style={{ color: 'var(--accent-warning)' }}>
@@ -123,8 +142,8 @@ export default function Statistics() {
             <div className="stat-sub">Richter</div>
           </div>
         </div>
-        <div className="stat-card" style={{ '--stat-color': 'var(--accent-success)', '--stat-icon-bg': 'rgba(16,185,129,0.1)' }}>
-          <div className="stat-icon">📈</div>
+        <div className="stat-card" style={{ '--stat-color': 'var(--accent-success)' }}>
+          <div className="stat-icon"><TrendingUp size={24} /></div>
           <div className="stat-content">
             <div className="stat-label">Son 7 Gün Ort.</div>
             <div className="stat-value" style={{ color: 'var(--accent-success)' }}>
@@ -136,67 +155,77 @@ export default function Statistics() {
       </div>
 
       {!stats ? (
-        <div className="card">
-          <div className="empty-state">
-            <div className="empty-state-icon">📊</div>
-            <div className="empty-state-text">İstatistik için Firebase verisi bekleniyor...</div>
+        <div className="card reveal-el">
+          <div className="empty-state" style={{ padding: '6rem 0', textAlign: 'center' }}>
+            <BarChart3 size={48} color="var(--text-muted)" style={{ opacity: 0.3, marginBottom: '1rem' }} />
+            <div className="empty-state-text" style={{ color: 'var(--text-muted)' }}>İstatistik için Firebase verisi bekleniyor...</div>
           </div>
         </div>
       ) : (
         <>
           {/* Richter over time */}
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div className="card reveal-el" style={{ marginBottom: '1.5rem' }}>
             <div className="card-header">
-              <div className="card-title">📉 Richter Zaman Grafiği</div>
+              <div className="card-title">
+                <ChartIcon size={18} className="text-warning" />
+                Richter Zaman Grafiği
+              </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Son 100 olay</div>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={280}>
               <LineChart data={timeSeriesData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="label" tick={{ fill: '#475569', fontSize: 10 }} interval="preserveStartEnd" minTickGap={30} />
-                <YAxis tick={{ fill: '#475569', fontSize: 10 }} domain={[0, 'auto']} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: '#52525b', fontSize: 11 }} interval="preserveStartEnd" minTickGap={40} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
+                <YAxis tick={{ fill: '#52525b', fontSize: 11 }} domain={[0, 'auto']} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="richter" stroke="#f59e0b" strokeWidth={2} dot={false} name="Richter" />
+                <Line type="monotone" dataKey="richter" stroke="#ffb800" strokeWidth={2} dot={false} name="Richter" />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
           {/* PGA over time */}
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div className="card reveal-el" style={{ marginBottom: '1.5rem' }}>
             <div className="card-header">
-              <div className="card-title">📡 PGA Zaman Grafiği</div>
+              <div className="card-title">
+                <Radio size={18} className="text-primary" />
+                PGA Zaman Grafiği
+              </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Son 100 olay</div>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={280}>
               <LineChart data={timeSeriesData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="label" tick={{ fill: '#475569', fontSize: 10 }} interval="preserveStartEnd" minTickGap={30} />
-                <YAxis tick={{ fill: '#475569', fontSize: 10 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: '#52525b', fontSize: 11 }} interval="preserveStartEnd" minTickGap={40} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
+                <YAxis tick={{ fill: '#52525b', fontSize: 11 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="pga" stroke="#3b82f6" strokeWidth={2} dot={false} name="PGA" />
+                <Line type="monotone" dataKey="pga" stroke="#00f0ff" strokeWidth={2} dot={false} name="PGA" />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
           {/* Richter Histogram */}
-          <div className="card">
+          <div className="card reveal-el">
             <div className="card-header">
-              <div className="card-title">📊 Richter Dağılımı (Histogram)</div>
+              <div className="card-title">
+                <ListEnd size={18} className="text-secondary" />
+                Richter Dağılımı (Histogram)
+              </div>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={histData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="range" tick={{ fill: '#475569', fontSize: 11 }} />
-                <YAxis tick={{ fill: '#475569', fontSize: 11 }} allowDecimals={false} />
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={histData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }} barSize={32}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis dataKey="range" tick={{ fill: '#52525b', fontSize: 11 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
+                <YAxis tick={{ fill: '#52525b', fontSize: 11 }} allowDecimals={false} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} />
                 <Tooltip
+                  cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                   content={({ active, payload, label }) => active && payload?.length ? (
-                    <div style={{ background: 'rgba(19,24,36,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
-                      <div style={{ color: '#94a3b8' }}>Richter {label}</div>
-                      <div style={{ color: '#6366f1', fontWeight: 700 }}>{payload[0].value} olay</div>
+                    <div style={{ background: 'rgba(10, 10, 12, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px', fontSize: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+                      <div style={{ color: '#a1a1aa', marginBottom: 4 }}>Richter {label}</div>
+                      <div style={{ color: '#7000ff', fontWeight: 700, fontSize: '14px' }}>{payload[0].value} olay</div>
                     </div>
                   ) : null}
                 />
-                <Bar dataKey="count" fill="#6366f1" name="Olay Sayısı" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="#7000ff" name="Olay Sayısı" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
