@@ -323,4 +323,3 @@ npm run dev
 | Mesaj Kuyruğu | ✅ Çalışıyor | localStorage, max 200 mesaj, otomatik flush |
 | GSAP Animasyonları | ✅ Çalışıyor | Sayfa giriş + alarm banner |
 | Lucide İkonları | ✅ Çalışıyor | Tüm emojiler SVG ikonlarla değiştirildi |
-| PWA (Çevrimdışı) | ❌ Henüz yok | `vite-plugin-pwa` ile eklenebilir |
