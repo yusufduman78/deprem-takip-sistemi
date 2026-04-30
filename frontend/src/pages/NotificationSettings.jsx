@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getSettings, saveSettings, requestNotificationPermission } from '../services/notificationService'
+import { isEmailConfigured } from '../services/emailService'
 import { toast } from 'react-toastify'
 import { useEarthquake } from '../context/EarthquakeContext'
-import { Settings, Bell, Key, Info, Cloud, Save, AlertTriangle, CheckCircle2, XCircle, BellRing } from 'lucide-react'
+import { Settings, Bell, Key, Info, Cloud, Save, AlertTriangle, CheckCircle2, XCircle, BellRing, Mail } from 'lucide-react'
 import gsap from 'gsap'
 
 export default function NotificationSettings() {
@@ -229,24 +230,39 @@ export default function NotificationSettings() {
             </div>
           </div>
 
-          {/* FCM Info */}
-          <div className="card" style={{ borderColor: 'rgba(99,102,241,0.2)', background: 'rgba(99,102,241,0.04)' }}>
+          {/* EmailJS E-posta Servisi */}
+          <div className="card" style={{ borderColor: isEmailConfigured() ? 'rgba(16,185,129,0.2)' : 'rgba(99,102,241,0.2)', background: isEmailConfigured() ? 'rgba(16,185,129,0.04)' : 'rgba(99,102,241,0.04)' }}>
             <div className="card-header">
               <div className="card-title">
-                <Cloud size={18} style={{ color: '#6366f1' }} />
-                Firebase Cloud Messaging
+                <Mail size={18} style={{ color: isEmailConfigured() ? 'var(--accent-success)' : '#6366f1' }} />
+                E-posta Servisi (EmailJS)
               </div>
-              <span className="badge badge-warning">Yapılandırma Gerekli</span>
+              {isEmailConfigured() 
+                ? <span className="badge badge-normal"><CheckCircle2 size={12}/> Yapılandırıldı</span>
+                : <span className="badge badge-warning">Yapılandırma Gerekli</span>
+              }
             </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-              FCM ve e-posta bildirimleri için <strong style={{ color: 'var(--text-primary)' }}>Firebase Cloud Functions</strong> ile
-              <strong style={{ color: 'var(--text-primary)' }}> Nodemailer</strong> yapılandırılması gerekir.
-              <br /><br />
-              SMTP bilgileri yalnızca backend/cloud function tarafında tutulur — frontend'e gömülmez.
-            </p>
-            <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, fontSize: '0.78rem', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-muted)' }}>
-              VITE_FIREBASE_VAPID_KEY=your_key
-            </div>
+            {isEmailConfigured() ? (
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                EmailJS yapılandırması tamamlandı. Deprem algılandığında, e-posta bildirimleri açıksa ve bir adres girildiyse
+                otomatik olarak uyarı e-postası gönderilecektir.
+                <br /><br />
+                <strong style={{ color: 'var(--text-primary)' }}>Ücretsiz plan:</strong> Ayda 200 e-posta
+              </p>
+            ) : (
+              <>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                  E-posta bildirimleri için <strong style={{ color: 'var(--text-primary)' }}>EmailJS</strong> (ücretsiz) kullanılır.
+                  Yapılandırmak için <a href="https://www.emailjs.com" target="_blank" rel="noopener" style={{ color: 'var(--accent-primary)' }}>emailjs.com</a>'da hesap açıp
+                  aşağıdaki değerleri <code>.env</code> dosyasına ekleyin:
+                </p>
+                <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--border-default)', borderRadius: 8, fontSize: '0.78rem', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <span>VITE_EMAILJS_SERVICE_ID=service_xxx</span>
+                  <span>VITE_EMAILJS_TEMPLATE_ID=template_xxx</span>
+                  <span>VITE_EMAILJS_PUBLIC_KEY=xxx</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -8,6 +8,9 @@ const BROKER_URL = import.meta.env.VITE_MQTT_BROKER_URL || 'wss://broker.hivemq.
 const TOPIC_EVENTS = import.meta.env.VITE_MQTT_TOPIC_CLOUD_EVENTS || 'cloud/earthquake_events'
 const TOPIC_HEALTH = import.meta.env.VITE_MQTT_TOPIC_SYSTEM_HEALTH || 'system/health'
 
+const QUEUE_KEY = 'dts_offline_queue'
+const MAX_QUEUE_SIZE = 200
+
 class MQTTService {
   constructor() {
     this.client = null
@@ -15,7 +18,39 @@ class MQTTService {
     this.connected = false
     this.reconnectAttempts = 0
     this.MAX_RECONNECT = 5
+    this._queue = this._loadQueue()
   }
+
+  // Offline Queue: persist to localStorage
+  _loadQueue() {
+    try {
+      return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]')
+    } catch { return [] }
+  }
+
+  _saveQueue() {
+    try {
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(this._queue.slice(-MAX_QUEUE_SIZE)))
+    } catch { /* storage full, ignore */ }
+  }
+
+  _enqueue(topic, data) {
+    this._queue.push({ topic, data, ts: Date.now() })
+    if (this._queue.length > MAX_QUEUE_SIZE) this._queue = this._queue.slice(-MAX_QUEUE_SIZE)
+    this._saveQueue()
+    console.log(`[MQTT Queue] Enqueued message (${this._queue.length} pending)`)
+  }
+
+  _flushQueue() {
+    if (!this._queue.length) return
+    console.log(`[MQTT Queue] Flushing ${this._queue.length} queued messages`)
+    const pending = [...this._queue]
+    this._queue = []
+    this._saveQueue()
+    pending.forEach(({ topic, data }) => this._emit(topic, data))
+  }
+
+  get queueSize() { return this._queue.length }
 
   connect(onStatusChange) {
     if (this.client) return
@@ -39,7 +74,11 @@ class MQTTService {
       // Subscribe to bridge output channels (as specified in README)
       this.client.subscribe([TOPIC_EVENTS, TOPIC_HEALTH], { qos: 1 }, (err) => {
         if (err) console.error('[MQTT] Subscribe error:', err)
-        else console.log('[MQTT] Subscribed to cloud/earthquake_events & system/health')
+        else {
+          console.log('[MQTT] Subscribed to cloud/earthquake_events & system/health')
+          // Flush any messages that were queued while offline
+          this._flushQueue()
+        }
       })
     })
 
